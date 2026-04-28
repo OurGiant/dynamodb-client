@@ -32,6 +32,8 @@ public class DynamoDBBrowser extends JFrame {
     private Image createAppIcon() {
         BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = icon.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2d.setColor(new Color(70, 130, 180));
         g2d.fillRect(0, 0, 16, 16);
         g2d.setColor(Color.WHITE);
@@ -771,8 +773,10 @@ public class DynamoDBBrowser extends JFrame {
     }
     
     public static void main(String[] args) {
+        System.setProperty("awt.useSystemAAFontSettings", "on");
+        System.setProperty("swing.aatext", "true");
         System.out.println("Starting DynamoDB Browser...");
-        
+
         SwingUtilities.invokeLater(() -> {
             try {
                 System.out.println("Initializing UI...");
