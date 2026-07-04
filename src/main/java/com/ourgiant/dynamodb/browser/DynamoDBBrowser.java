@@ -14,6 +14,9 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.sts.StsClient;
+import software.amazon.awssdk.services.sts.model.GetCallerIdentityRequest;
+import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 import software.amazon.awssdk.core.exception.SdkException;
 
 public class DynamoDBBrowser extends JFrame {
@@ -103,13 +106,15 @@ public class DynamoDBBrowser extends JFrame {
     
     private boolean showConnectionDialog(String defaultArn, String defaultProfile) {
         System.out.println("Showing connection dialog...");
-        
+
         // Read AWS profiles from credentials file
         List<String> profiles = readAwsProfiles();
-        
-        JPanel panel = new JPanel(new GridLayout(3, 2, 5, 5));
-        JTextField arnField = new JTextField(defaultArn != null ? defaultArn : "", 30);
-        
+
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
         // Use combo box for profiles instead of text field
         JComboBox<String> profileCombo = new JComboBox<>(profiles.toArray(new String[0]));
         if (defaultProfile != null && profiles.contains(defaultProfile)) {
@@ -118,34 +123,169 @@ public class DynamoDBBrowser extends JFrame {
             profileCombo.setSelectedItem("default");
         }
         profileCombo.setEditable(true); // Allow custom profile names
-        
-        panel.add(new JLabel("DynamoDB Table ARN:"));
-        panel.add(arnField);
-        panel.add(new JLabel("AWS Profile:"));
-        panel.add(profileCombo);
-        
+
+        JLabel profileStatusLabel = new JLabel(" ");
+
+        JComboBox<String> arnCombo = new JComboBox<>();
+        arnCombo.setEditable(true); // Allow pasting/typing an ARN directly as a fallback
+        if (defaultArn != null && !defaultArn.isEmpty()) {
+            arnCombo.addItem(defaultArn);
+            arnCombo.setSelectedItem(defaultArn);
+        }
+
+        JButton refreshArnsButton = new JButton("Refresh");
+
+        gbc.gridx = 0; gbc.gridy = 0; gbc.weightx = 0;
+        panel.add(new JLabel("AWS Profile:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1;
+        panel.add(profileCombo, gbc);
+        gbc.gridx = 2; gbc.weightx = 0;
+        panel.add(profileStatusLabel, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0;
+        panel.add(new JLabel("DynamoDB Table ARN:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1;
+        panel.add(arnCombo, gbc);
+        gbc.gridx = 2; gbc.weightx = 0;
+        panel.add(refreshArnsButton, gbc);
+
+        // Table name -> resolved ARN / TableDescription, populated lazily as the user
+        // picks entries from the ARN dropdown (see the itemListener below).
+        Map<String, String> arnByTableName = new HashMap<>();
+        Map<String, TableDescription> descriptionByArn = new HashMap<>();
+
+        Runnable refreshArns = () -> {
+            String profile = comboText(profileCombo);
+            if (profile.isEmpty()) {
+                return;
+            }
+
+            profileStatusLabel.setText("Checking...");
+            profileStatusLabel.setForeground(Color.GRAY);
+            profileStatusLabel.setToolTipText(null);
+            arnCombo.removeAllItems();
+            arnCombo.setEnabled(false);
+            refreshArnsButton.setEnabled(false);
+            arnByTableName.clear();
+            descriptionByArn.clear();
+
+            new SwingWorker<ProfileActivity, Void>() {
+                @Override
+                protected ProfileActivity doInBackground() {
+                    return checkProfileActivity(profile);
+                }
+
+                @Override
+                protected void done() {
+                    ProfileActivity activity;
+                    try {
+                        activity = get();
+                    } catch (Exception e) {
+                        activity = new ProfileActivity(false, null, e.getMessage(), Collections.emptyList(), null);
+                    }
+
+                    arnCombo.setEnabled(true);
+                    refreshArnsButton.setEnabled(true);
+
+                    if (activity.active) {
+                        profileStatusLabel.setForeground(new Color(0, 130, 0));
+                        profileStatusLabel.setText("● Active");
+                        String tooltip = "Account: " + activity.accountId + " (" + activity.region + ")";
+                        if (activity.tableNames.isEmpty()) {
+                            tooltip += " - no tables found";
+                        }
+                        profileStatusLabel.setToolTipText(tooltip);
+                        for (String name : activity.tableNames) {
+                            arnCombo.addItem(name);
+                        }
+                    } else {
+                        profileStatusLabel.setForeground(Color.RED);
+                        profileStatusLabel.setText("● Inactive");
+                        profileStatusLabel.setToolTipText(activity.errorMessage != null
+                            ? activity.errorMessage
+                            : "Profile could not be verified");
+                    }
+                }
+            }.execute();
+        };
+
+        profileCombo.addActionListener(e -> refreshArns.run());
+        refreshArnsButton.addActionListener(e -> refreshArns.run());
+
+        // Resolve the authoritative ARN for a selected table name on demand (DescribeTable
+        // per selection), rather than describing every table just to populate the list.
+        arnCombo.addItemListener(e -> {
+            if (e.getStateChange() != ItemEvent.SELECTED) {
+                return;
+            }
+            if (!(e.getItem() instanceof String tableNameCandidate)) {
+                return;
+            }
+            if (tableNameCandidate.startsWith("arn:") || arnByTableName.containsKey(tableNameCandidate)) {
+                return;
+            }
+
+            String profile = comboText(profileCombo);
+            String region = resolveRegionForProfile(profile);
+
+            new SwingWorker<TableDescription, Void>() {
+                @Override
+                protected TableDescription doInBackground() {
+                    try (DynamoDbClient client = DynamoDbClient.builder()
+                            .region(Region.of(region))
+                            .credentialsProvider(ProfileCredentialsProvider.create(profile))
+                            .build()) {
+                        return client.describeTable(DescribeTableRequest.builder()
+                            .tableName(tableNameCandidate)
+                            .build()).table();
+                    }
+                }
+
+                @Override
+                protected void done() {
+                    try {
+                        TableDescription description = get();
+                        String arn = description.tableArn();
+                        arnByTableName.put(tableNameCandidate, arn);
+                        descriptionByArn.put(arn, description);
+                        if (tableNameCandidate.equals(comboText(arnCombo))) {
+                            arnCombo.setSelectedItem(arn);
+                        }
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(panel,
+                            "Could not resolve ARN for table '" + tableNameCandidate + "': " + ex.getMessage(),
+                            "ARN Resolution Error", JOptionPane.WARNING_MESSAGE);
+                    }
+                }
+            }.execute();
+        });
+
         // Make sure the frame is visible first so the dialog has a parent
         this.setVisible(true);
         this.toFront();
         this.requestFocus();
-        
-        int result = JOptionPane.showConfirmDialog(this, panel, 
+
+        if (defaultProfile != null && !defaultProfile.trim().isEmpty()) {
+            refreshArns.run();
+        }
+
+        int result = JOptionPane.showConfirmDialog(this, panel,
             "Connect to DynamoDB", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-        
+
         System.out.println("Dialog result: " + result);
-        
+
         if (result == JOptionPane.OK_OPTION) {
-            tableArn = arnField.getText().trim();
-            String profile = (String) profileCombo.getSelectedItem();
-            if (profile != null) {
-                profile = profile.trim();
+            String profile = comboText(profileCombo);
+            tableArn = comboText(arnCombo);
+            if (arnByTableName.containsKey(tableArn)) {
+                tableArn = arnByTableName.get(tableArn);
             }
-            
-            if (tableArn.isEmpty() || Objects.requireNonNull(profile).isEmpty()) {
+
+            if (tableArn.isEmpty() || profile.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Please provide both ARN and profile.");
                 return showConnectionDialog(tableArn, profile);
             }
-            
+
             // Extract table name and region from ARN
             // ARN format: arn:aws:dynamodb:region:account:table/table-name
             try {
@@ -155,34 +295,134 @@ public class DynamoDBBrowser extends JFrame {
                 }
                 String regionStr = parts[3];
                 tableName = parts[5].substring(parts[5].indexOf("/") + 1);
-                
+
                 // Initialize DynamoDB client
                 dynamoDb = DynamoDbClient.builder()
                     .region(Region.of(regionStr))
                     .credentialsProvider(ProfileCredentialsProvider.create(profile))
                     .build();
-                
-                // Test connection and get table description
-                tableDescription = dynamoDb.describeTable(DescribeTableRequest.builder()
-                    .tableName(tableName)
-                    .build()).table();
-                
+
+                // Reuse the description resolved while populating the dropdown, if available,
+                // otherwise test the connection now (e.g. a manually pasted ARN).
+                TableDescription cachedDescription = descriptionByArn.get(tableArn);
+                tableDescription = cachedDescription != null
+                    ? cachedDescription
+                    : dynamoDb.describeTable(DescribeTableRequest.builder()
+                        .tableName(tableName)
+                        .build()).table();
+
                 // Save settings
                 prefs.put("tableArn", tableArn);
                 prefs.put("awsProfile", profile);
-                
+
                 initializeUI();
                 loadInitialRecords();
                 return true;
-                
+
             } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, 
+                JOptionPane.showMessageDialog(this,
                     "Error connecting to DynamoDB: " + e.getMessage(),
                     "Connection Error", JOptionPane.ERROR_MESSAGE);
                 return showConnectionDialog(tableArn, profile);
             }
         }
         return false;
+    }
+
+    private String comboText(JComboBox<String> combo) {
+        Object editorItem = combo.getEditor().getItem();
+        return editorItem != null ? editorItem.toString().trim() : "";
+    }
+
+    // Result of checking whether a profile's credentials are currently usable.
+    private static class ProfileActivity {
+        final boolean active;
+        final String accountId;
+        final String errorMessage;
+        final List<String> tableNames;
+        final String region;
+
+        ProfileActivity(boolean active, String accountId, String errorMessage, List<String> tableNames, String region) {
+            this.active = active;
+            this.accountId = accountId;
+            this.errorMessage = errorMessage;
+            this.tableNames = tableNames;
+            this.region = region;
+        }
+    }
+
+    // Verifies a profile's credentials via STS and, if active, lists its DynamoDB tables.
+    // Runs network calls, so callers must invoke this off the EDT (e.g. from a SwingWorker).
+    private ProfileActivity checkProfileActivity(String profile) {
+        String region = resolveRegionForProfile(profile);
+        try {
+            ProfileCredentialsProvider credentialsProvider = ProfileCredentialsProvider.create(profile);
+
+            String accountId;
+            try (StsClient stsClient = StsClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(credentialsProvider)
+                    .build()) {
+                GetCallerIdentityResponse identity = stsClient.getCallerIdentity(
+                    GetCallerIdentityRequest.builder().build());
+                accountId = identity.account();
+            }
+
+            List<String> tableNames = new ArrayList<>();
+            try (DynamoDbClient client = DynamoDbClient.builder()
+                    .region(Region.of(region))
+                    .credentialsProvider(credentialsProvider)
+                    .build()) {
+                String startTable = null;
+                do {
+                    ListTablesResponse response = client.listTables(ListTablesRequest.builder()
+                        .exclusiveStartTableName(startTable)
+                        .build());
+                    tableNames.addAll(response.tableNames());
+                    startTable = response.lastEvaluatedTableName();
+                } while (startTable != null);
+            }
+
+            return new ProfileActivity(true, accountId, null, tableNames, region);
+        } catch (Exception e) {
+            return new ProfileActivity(false, null, e.getMessage(), Collections.emptyList(), region);
+        }
+    }
+
+    // Resolves the region to use for a profile: its ~/.aws/config entry, then the
+    // standard AWS region environment variables, then a default.
+    private String resolveRegionForProfile(String profile) {
+        String userHome = System.getProperty("user.home");
+        File configFile = new File(userHome, ".aws/config");
+
+        if (configFile.exists()) {
+            String sectionHeader = "default".equals(profile) ? "[default]" : "[profile " + profile + "]";
+            try (BufferedReader reader = new BufferedReader(new FileReader(configFile))) {
+                String line;
+                boolean inSection = false;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("[") && line.endsWith("]")) {
+                        inSection = line.equalsIgnoreCase(sectionHeader);
+                        continue;
+                    }
+                    if (inSection && line.startsWith("region")) {
+                        String[] kv = line.split("=", 2);
+                        if (kv.length == 2 && !kv[1].trim().isEmpty()) {
+                            return kv[1].trim();
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("Error reading AWS config file: " + e.getMessage());
+            }
+        }
+
+        String envRegion = System.getenv("AWS_REGION");
+        if (envRegion == null || envRegion.isEmpty()) {
+            envRegion = System.getenv("AWS_DEFAULT_REGION");
+        }
+        return (envRegion != null && !envRegion.isEmpty()) ? envRegion : "us-east-1";
     }
     
     private List<String> readAwsProfiles() {
