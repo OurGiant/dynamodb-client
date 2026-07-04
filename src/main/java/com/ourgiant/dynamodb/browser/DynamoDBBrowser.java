@@ -957,17 +957,17 @@ public class DynamoDBBrowser extends JFrame {
     private void executeQuery(IndexOption indexOption, JPanel keyPanel) {
         try {
             Map<String, AttributeValue> keyConditions = new HashMap<>();
-            
+
             for (Component comp : keyPanel.getComponents()) {
                 if (comp instanceof JTextField field) {
                     String value = field.getText().trim();
                     if (!value.isEmpty()) {
-                        keyConditions.put(field.getName(), 
-                            AttributeValue.builder().s(value).build());
+                        keyConditions.put(field.getName(),
+                            buildKeyAttributeValue(resolveAttributeType(field.getName()), value));
                     }
                 }
             }
-            
+
             if (keyConditions.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "Please provide at least the partition key.");
                 return;
@@ -1017,13 +1017,41 @@ public class DynamoDBBrowser extends JFrame {
                 loadMoreButton.setEnabled(false); // Query results don't support load more in this simple version
             }
             
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(this,
+                e.getMessage(),
+                "Unsupported Key Type", JOptionPane.WARNING_MESSAGE);
         } catch (SdkException e) {
-            JOptionPane.showMessageDialog(this, 
+            JOptionPane.showMessageDialog(this,
                 "Query error: " + e.getMessage(),
                 "Query Error", JOptionPane.ERROR_MESSAGE);
         }
     }
-    
+
+    // Looks up a key attribute's declared type from the table description, so query key
+    // conditions can be built with the correct AttributeValue type (DynamoDB key comparisons
+    // are type-strict: an S-typed condition never matches an N-typed key, and vice versa).
+    // Defaults to String if the attribute isn't found (shouldn't happen for a real key schema).
+    private ScalarAttributeType resolveAttributeType(String attributeName) {
+        for (AttributeDefinition definition : tableDescription.attributeDefinitions()) {
+            if (definition.attributeName().equals(attributeName)) {
+                return definition.attributeType();
+            }
+        }
+        return ScalarAttributeType.S;
+    }
+
+    private AttributeValue buildKeyAttributeValue(ScalarAttributeType type, String rawValue) {
+        if (type == ScalarAttributeType.N) {
+            return AttributeValue.builder().n(rawValue).build();
+        }
+        if (type == ScalarAttributeType.B) {
+            throw new IllegalArgumentException(
+                "Binary key attributes aren't supported for querying in this UI.");
+        }
+        return AttributeValue.builder().s(rawValue).build();
+    }
+
     public static void main(String[] args) {
         System.setProperty("awt.useSystemAAFontSettings", "on");
         System.setProperty("swing.aatext", "true");
