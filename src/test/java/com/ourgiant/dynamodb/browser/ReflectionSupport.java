@@ -2,6 +2,7 @@ package com.ourgiant.dynamodb.browser;
 
 import org.objenesis.ObjenesisStd;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -18,6 +19,16 @@ final class ReflectionSupport {
 
     static DynamoDBBrowser newBrowserInstance() {
         return OBJENESIS.newInstance(DynamoDBBrowser.class);
+    }
+
+    static void setField(Object target, String fieldName, Object value) {
+        try {
+            Field field = DynamoDBBrowser.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(target, value);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new AssertionError("Reflection setup failed for field " + fieldName, e);
+        }
     }
 
     static Object invoke(Object target, String methodName, Class<?>[] paramTypes, Object... args) {
