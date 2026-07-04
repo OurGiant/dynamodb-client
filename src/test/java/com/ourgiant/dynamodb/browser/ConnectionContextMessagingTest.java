@@ -29,32 +29,32 @@ class ConnectionContextMessagingTest {
 
     @Test
     void titleIncludesProfileAccountRegionAndTable() {
-        ReflectionSupport.setField(browser, "connectedProfile", "travelqa-admin");
-        ReflectionSupport.setField(browser, "connectedAccountId", "284953268601");
+        ReflectionSupport.setField(browser, "connectedProfile", "example-profile");
+        ReflectionSupport.setField(browser, "connectedAccountId", "123456789012");
         ReflectionSupport.setField(browser, "connectedRegion", "us-east-1");
         ReflectionSupport.setField(browser, "tableName", "Orders");
 
-        assertEquals("DynamoDB Browser — travelqa-admin (284953268601, us-east-1) — Orders", buildWindowTitle());
+        assertEquals("DynamoDB Browser — example-profile (123456789012, us-east-1) — Orders", buildWindowTitle());
     }
 
     @Test
     void titleDegradesGracefullyWithoutAccountId() {
-        ReflectionSupport.setField(browser, "connectedProfile", "travelqa-admin");
+        ReflectionSupport.setField(browser, "connectedProfile", "example-profile");
         ReflectionSupport.setField(browser, "connectedRegion", "us-east-1");
         ReflectionSupport.setField(browser, "tableName", "Orders");
 
-        assertEquals("DynamoDB Browser — travelqa-admin (us-east-1) — Orders", buildWindowTitle());
+        assertEquals("DynamoDB Browser — example-profile (us-east-1) — Orders", buildWindowTitle());
     }
 
     @Test
     void deleteMessageIncludesTableProfileAndAccount() {
-        ReflectionSupport.setField(browser, "connectedProfile", "travelqa-admin");
-        ReflectionSupport.setField(browser, "connectedAccountId", "284953268601");
+        ReflectionSupport.setField(browser, "connectedProfile", "example-profile");
+        ReflectionSupport.setField(browser, "connectedAccountId", "123456789012");
         ReflectionSupport.setField(browser, "tableName", "Orders");
 
         assertEquals(
             "Are you sure you want to delete this record from \"Orders\" "
-                + "(profile: travelqa-admin, account: 284953268601)?\nThis action cannot be undone.",
+                + "(profile: example-profile, account: 123456789012)?\nThis action cannot be undone.",
             buildDeleteConfirmationMessage());
     }
 
