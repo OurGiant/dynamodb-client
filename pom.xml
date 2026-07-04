@@ -35,6 +35,13 @@
             <artifactId>auth</artifactId>
             <version>${aws.sdk.version}</version>
         </dependency>
+
+        <!-- AWS SDK STS (for verifying whether a profile's credentials are active) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
