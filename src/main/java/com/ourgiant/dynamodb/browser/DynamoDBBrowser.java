@@ -24,6 +24,9 @@ public class DynamoDBBrowser extends JFrame {
     private DynamoDbClient dynamoDb;
     private String tableName;
     private String tableArn;
+    private String connectedProfile;
+    private String connectedAccountId;
+    private String connectedRegion;
     private JTable recordsTable;
     private DefaultTableModel tableModel;
     private JButton loadMoreButton;
@@ -153,6 +156,9 @@ public class DynamoDBBrowser extends JFrame {
         // picks entries from the ARN dropdown (see the itemListener below).
         Map<String, String> arnByTableName = new HashMap<>();
         Map<String, TableDescription> descriptionByArn = new HashMap<>();
+        // Holds the account ID from the most recent successful profile check, so it can be
+        // shown in the window title/delete confirmation without an extra STS call at connect time.
+        String[] lastKnownAccountId = new String[1];
 
         Runnable refreshArns = () -> {
             String profile = comboText(profileCombo);
@@ -168,6 +174,7 @@ public class DynamoDBBrowser extends JFrame {
             refreshArnsButton.setEnabled(false);
             arnByTableName.clear();
             descriptionByArn.clear();
+            lastKnownAccountId[0] = null;
 
             new SwingWorker<ProfileActivity, Void>() {
                 @Override
@@ -188,6 +195,7 @@ public class DynamoDBBrowser extends JFrame {
                     refreshArnsButton.setEnabled(true);
 
                     if (activity.active) {
+                        lastKnownAccountId[0] = activity.accountId;
                         profileStatusLabel.setForeground(new Color(0, 130, 0));
                         profileStatusLabel.setText("● Active");
                         String tooltip = "Account: " + activity.accountId + " (" + activity.region + ")";
@@ -311,6 +319,11 @@ public class DynamoDBBrowser extends JFrame {
                 prefs.put("tableArn", tableArn);
                 prefs.put("awsProfile", profile);
 
+                connectedProfile = profile;
+                connectedAccountId = lastKnownAccountId[0];
+                connectedRegion = regionStr;
+                setTitle(buildWindowTitle());
+
                 initializeUI();
                 loadInitialRecords();
                 return true;
@@ -328,6 +341,56 @@ public class DynamoDBBrowser extends JFrame {
     private String comboText(JComboBox<String> combo) {
         Object editorItem = combo.getEditor().getItem();
         return editorItem != null ? editorItem.toString().trim() : "";
+    }
+
+    // Builds the main window title from the current connection, so it's obvious at a glance
+    // which profile/account/region/table is connected (e.g. to avoid confusing prod and QA).
+    // Degrades gracefully when the account ID isn't known yet (e.g. a manually pasted ARN
+    // whose profile's active-check hasn't completed or wasn't run).
+    private String buildWindowTitle() {
+        StringBuilder title = new StringBuilder("DynamoDB Browser");
+
+        if (connectedProfile != null && !connectedProfile.isEmpty()) {
+            title.append(" — ").append(connectedProfile);
+
+            List<String> details = new ArrayList<>();
+            if (connectedAccountId != null && !connectedAccountId.isEmpty()) {
+                details.add(connectedAccountId);
+            }
+            if (connectedRegion != null && !connectedRegion.isEmpty()) {
+                details.add(connectedRegion);
+            }
+            if (!details.isEmpty()) {
+                title.append(" (").append(String.join(", ", details)).append(")");
+            }
+        }
+
+        if (tableName != null && !tableName.isEmpty()) {
+            title.append(" — ").append(tableName);
+        }
+
+        return title.toString();
+    }
+
+    // Builds the delete-confirmation message, naming the table/profile/account being affected
+    // so the last thing a user sees before confirming names exactly what they're deleting from.
+    private String buildDeleteConfirmationMessage() {
+        StringBuilder message = new StringBuilder("Are you sure you want to delete this record");
+
+        if (tableName != null && !tableName.isEmpty()) {
+            message.append(" from \"").append(tableName).append("\"");
+        }
+
+        if (connectedProfile != null && !connectedProfile.isEmpty()) {
+            message.append(" (profile: ").append(connectedProfile);
+            if (connectedAccountId != null && !connectedAccountId.isEmpty()) {
+                message.append(", account: ").append(connectedAccountId);
+            }
+            message.append(")");
+        }
+
+        message.append("?\nThis action cannot be undone.");
+        return message.toString();
     }
 
     // ARN format: arn:aws:dynamodb:region:account:table/table-name
@@ -727,7 +790,7 @@ public class DynamoDBBrowser extends JFrame {
         deleteButton.setForeground(Color.RED);
         deleteButton.addActionListener(e -> {
             int confirm = JOptionPane.showConfirmDialog(dialog,
-                "Are you sure you want to delete this record?\nThis action cannot be undone.",
+                buildDeleteConfirmationMessage(),
                 "Confirm Delete",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE);
