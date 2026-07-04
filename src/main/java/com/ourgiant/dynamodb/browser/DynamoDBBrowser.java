@@ -287,14 +287,10 @@ public class DynamoDBBrowser extends JFrame {
             }
 
             // Extract table name and region from ARN
-            // ARN format: arn:aws:dynamodb:region:account:table/table-name
             try {
-                String[] parts = tableArn.split(":");
-                if (parts.length < 6) {
-                    throw new IllegalArgumentException("Invalid ARN format");
-                }
-                String regionStr = parts[3];
-                tableName = parts[5].substring(parts[5].indexOf("/") + 1);
+                ParsedTableArn parsedArn = parseTableArn(tableArn);
+                String regionStr = parsedArn.region();
+                tableName = parsedArn.tableName();
 
                 // Initialize DynamoDB client
                 dynamoDb = DynamoDbClient.builder()
@@ -332,6 +328,22 @@ public class DynamoDBBrowser extends JFrame {
     private String comboText(JComboBox<String> combo) {
         Object editorItem = combo.getEditor().getItem();
         return editorItem != null ? editorItem.toString().trim() : "";
+    }
+
+    // ARN format: arn:aws:dynamodb:region:account:table/table-name
+    // Package-private (rather than private) so tests in this package can use the
+    // parsed result directly after invoking the private parseTableArn method via reflection.
+    record ParsedTableArn(String region, String tableName) {
+    }
+
+    private ParsedTableArn parseTableArn(String arn) {
+        String[] parts = arn.split(":");
+        if (parts.length < 6) {
+            throw new IllegalArgumentException("Invalid ARN format");
+        }
+        String region = parts[3];
+        String name = parts[5].substring(parts[5].indexOf("/") + 1);
+        return new ParsedTableArn(region, name);
     }
 
     // Result of checking whether a profile's credentials are currently usable.
@@ -653,10 +665,10 @@ public class DynamoDBBrowser extends JFrame {
         if (value.n() != null) return value.n();
         if (value.bool() != null) return value.bool().toString();
         if (value.nul() != null && value.nul()) return "NULL";
-        if (value.ss() != null) return value.ss().toString();
-        if (value.ns() != null) return value.ns().toString();
-        if (value.m() != null) return "{Map}";
-        if (value.l() != null) return "[List]";
+        if (value.hasSs()) return value.ss().toString();
+        if (value.hasNs()) return value.ns().toString();
+        if (value.hasM()) return "{Map}";
+        if (value.hasL()) return "[List]";
         return value.toString();
     }
     
@@ -780,10 +792,10 @@ public class DynamoDBBrowser extends JFrame {
         if (value.n() != null) return value.n();
         if (value.bool() != null) return value.bool().toString();
         if (value.nul() != null && value.nul()) return "NULL";
-        if (value.ss() != null) return "String Set: " + value.ss();
-        if (value.ns() != null) return "Number Set: " + value.ns();
-        if (value.m() != null) return "Map: " + value.m().toString();
-        if (value.l() != null) return "List: " + value.l().toString();
+        if (value.hasSs()) return "String Set: " + value.ss();
+        if (value.hasNs()) return "Number Set: " + value.ns();
+        if (value.hasM()) return "Map: " + value.m().toString();
+        if (value.hasL()) return "List: " + value.l().toString();
         if (value.b() != null) return "Binary: " + value.b().toString();
         return value.toString();
     }
