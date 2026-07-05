@@ -18,8 +18,11 @@ import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.model.GetCallerIdentityRequest;
 import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 import software.amazon.awssdk.core.exception.SdkException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class DynamoDBBrowser extends JFrame {
+    private static final Logger log = LoggerFactory.getLogger(DynamoDBBrowser.class);
     private final Preferences prefs = Preferences.userNodeForPackage(DynamoDBBrowser.class);
     private DynamoDbClient dynamoDb;
     private String tableName;
@@ -49,66 +52,46 @@ public class DynamoDBBrowser extends JFrame {
         return icon;
     }
   
-    private void setupMenuBar() {
-        JMenuBar menuBar = new JMenuBar();
-        
-        JMenu fileMenu = new JMenu("File");
-        fileMenu.setMnemonic(KeyEvent.VK_F);
-        
-        fileMenu.addSeparator();
-        
-        JMenuItem exitItem = new JMenuItem("Exit");
-        exitItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Q, 
-            Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
-        exitItem.addActionListener(e -> System.exit(0));
-        fileMenu.add(exitItem);
-        
-        menuBar.add(fileMenu);
-        setJMenuBar(menuBar);
-    }    
-
     public DynamoDBBrowser() {
-        System.out.println("DynamoDBBrowser constructor called");
+        log.debug("DynamoDBBrowser constructor called");
         setTitle("DynamoDB Browser");
         setSize(1200, 700);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        
+
         try {
             setIconImage(createAppIcon());
         } catch (Exception e) {
             // Ignore if icon creation fails
-        }  
-        
+        }
+
         try {
             // Check if settings exist
             String savedArn = prefs.get("tableArn", null);
             String savedProfile = prefs.get("awsProfile", null);
-            
-            System.out.println("Saved ARN: " + savedArn);
-            System.out.println("Saved Profile: " + savedProfile);
-            
+
+            log.debug("Saved ARN: {}", savedArn);
+            log.debug("Saved profile: {}", savedProfile);
+
             // Show the dialog (don't exit immediately if cancelled on first run)
             boolean connected = showConnectionDialog(savedArn, savedProfile);
-            System.out.println("Connection result: " + connected);
-            setupMenuBar();
+            log.debug("Connection result: {}", connected);
             if (!connected) {
-                System.out.println("Connection dialog cancelled. Exiting.");
+                log.info("Connection dialog cancelled. Exiting.");
                 System.exit(0);
             }
         } catch (Exception e) {
-            System.err.println("Error in constructor:");
-//            e.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
+            log.error("Error initializing application", e);
+            JOptionPane.showMessageDialog(this,
                 "Error initializing: " + e.getMessage(),
-                "Initialization Error", 
+                "Initialization Error",
                 JOptionPane.ERROR_MESSAGE);
             System.exit(1);
         }
     }
     
     private boolean showConnectionDialog(String defaultArn, String defaultProfile) {
-        System.out.println("Showing connection dialog...");
+        log.debug("Showing connection dialog...");
 
         // Read AWS profiles from credentials file
         List<String> profiles = readAwsProfiles();
@@ -280,7 +263,7 @@ public class DynamoDBBrowser extends JFrame {
         int result = JOptionPane.showConfirmDialog(this, panel,
             "Connect to DynamoDB", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
 
-        System.out.println("Dialog result: " + result);
+        log.debug("Dialog result: {}", result);
 
         if (result == JOptionPane.OK_OPTION) {
             String profile = comboText(profileCombo);
@@ -489,7 +472,7 @@ public class DynamoDBBrowser extends JFrame {
                     }
                 }
             } catch (IOException e) {
-                System.err.println("Error reading AWS config file: " + e.getMessage());
+                log.warn("Error reading AWS config file", e);
             }
         }
 
@@ -521,7 +504,7 @@ public class DynamoDBBrowser extends JFrame {
                     }
                 }
             } catch (IOException e) {
-                System.err.println("Error reading AWS credentials file: " + e.getMessage());
+                log.warn("Error reading AWS credentials file", e);
             }
         }
         
@@ -545,10 +528,10 @@ public class DynamoDBBrowser extends JFrame {
                     }
                 }
             } catch (IOException e) {
-                System.err.println("Error reading AWS config file: " + e.getMessage());
+                log.warn("Error reading AWS config file", e);
             }
         }
-        
+
         return profiles;
     }
     
@@ -568,7 +551,10 @@ public class DynamoDBBrowser extends JFrame {
         // Menu bar
         JMenuBar menuBar = new JMenuBar();
         JMenu fileMenu = new JMenu("File");
+        fileMenu.setMnemonic(KeyEvent.VK_F);
         JMenuItem exitItem = new JMenuItem("Exit");
+        exitItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Q,
+            Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
         exitItem.addActionListener(e -> {
             int confirm = JOptionPane.showConfirmDialog(this,
                 "Are you sure you want to exit?",
@@ -827,24 +813,23 @@ public class DynamoDBBrowser extends JFrame {
                 String keyName = keyElement.attributeName();
                 AttributeValue keyValue = record.get(keyName);
                 if (keyValue == null) {
-                    System.err.println("Missing key attribute: " + keyName);
+                    log.warn("Missing key attribute: {}", keyName);
                     return false;
                 }
                 key.put(keyName, keyValue);
             }
-            
+
             DeleteItemRequest deleteRequest = DeleteItemRequest.builder()
                 .tableName(tableName)
                 .key(key)
                 .build();
-            
+
             dynamoDb.deleteItem(deleteRequest);
-            System.out.println("Record deleted successfully: " + key);
+            log.info("Record deleted successfully: {}", key);
             return true;
-            
+
         } catch (SdkException e) {
-            System.err.println("Error deleting record: " + e.getMessage());
-//            e.printStackTrace();
+            log.error("Error deleting record", e);
             return false;
         }
     }
@@ -1118,23 +1103,22 @@ public class DynamoDBBrowser extends JFrame {
     public static void main(String[] args) {
         System.setProperty("awt.useSystemAAFontSettings", "on");
         System.setProperty("swing.aatext", "true");
-        System.out.println("Starting DynamoDB Browser...");
+        log.info("Starting DynamoDB Browser...");
 
         SwingUtilities.invokeLater(() -> {
             try {
-                System.out.println("Initializing UI...");
+                log.debug("Initializing UI...");
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-                
+
                 DynamoDBBrowser browser = new DynamoDBBrowser();
                 browser.setVisible(true);
-                System.out.println("Application started successfully.");
-                
+                log.info("Application started successfully.");
+
             } catch (Exception e) {
-                System.err.println("Fatal error starting application:");
-//                e.printStackTrace();
-                JOptionPane.showMessageDialog(null, 
+                log.error("Fatal error starting application", e);
+                JOptionPane.showMessageDialog(null,
                     "Error starting application: " + e.getMessage(),
-                    "Startup Error", 
+                    "Startup Error",
                     JOptionPane.ERROR_MESSAGE);
                 System.exit(1);
             }

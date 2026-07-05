@@ -21,6 +21,8 @@
         <aws.sdk.version>2.40.17</aws.sdk.version>
         <junit.version>5.11.4</junit.version>
         <mockito.version>5.15.2</mockito.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <logback.version>1.5.13</logback.version>
     </properties>
 
     <dependencies>
@@ -43,6 +45,19 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sts</artifactId>
             <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!-- Logging: pinned explicitly (rather than left to whatever the AWS SDK pulls in
+             transitively) so slf4j-api and logback-classic resolve to a known-compatible pair. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
         </dependency>
 
         <!-- Test dependencies -->
