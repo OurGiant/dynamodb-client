@@ -36,6 +36,14 @@ public class DynamoDBBrowser extends JFrame {
     private Map<String, AttributeValue> lastEvaluatedKey;
     private final List<Map<String, AttributeValue>> allRecords = new ArrayList<>();
     private TableDescription tableDescription;
+
+    // Set while browsing results from a Query rather than the default table Scan, so
+    // "Load More" knows to re-run the same query (with exclusiveStartKey) instead of scanning.
+    private boolean queryMode;
+    private String activeQueryKeyConditionExpression;
+    private Map<String, String> activeQueryExpressionNames;
+    private Map<String, AttributeValue> activeQueryExpressionValues;
+    private String activeQueryIndexName;
     private final Integer dynamoQueryLimit = (Integer) 50;
 
     private Image createAppIcon() {
@@ -617,7 +625,13 @@ public class DynamoDBBrowser extends JFrame {
         // Bottom panel with load more button
         JPanel bottomPanel = new JPanel();
         loadMoreButton = new JButton("Load More (50)");
-        loadMoreButton.addActionListener(e -> loadMoreRecords());
+        loadMoreButton.addActionListener(e -> {
+            if (queryMode) {
+                loadMoreQueryResults();
+            } else {
+                loadMoreRecords();
+            }
+        });
         loadMoreButton.setEnabled(false);
         bottomPanel.add(loadMoreButton);
         add(bottomPanel, BorderLayout.SOUTH);
@@ -628,6 +642,7 @@ public class DynamoDBBrowser extends JFrame {
         lastEvaluatedKey = null;
         tableModel.setRowCount(0);
         tableModel.setColumnCount(0);
+        queryMode = false;
         loadMoreRecords();
     }
     
@@ -904,34 +919,33 @@ public class DynamoDBBrowser extends JFrame {
         mainPanel.add(keyPanel, gbc);
         
         // Information label
-        JLabel infoLabel = new JLabel("<html><i>Partition key is required. Sort key is optional.</i></html>");
+        JLabel infoLabel = new JLabel(
+            "<html><i>Partition key is required (exact match). Sort key is optional.</i></html>");
         infoLabel.setForeground(Color.GRAY);
         gbc.gridy = 3;
         mainPanel.add(infoLabel, gbc);
-        
+
         // Update key fields based on index selection
         indexCombo.addActionListener(e -> {
             keyPanel.removeAll();
             IndexOption selected = (IndexOption) indexCombo.getSelectedItem();
             if (selected == null) return;
-            
+
             List<KeySchemaElement> keys = selected.keySchema;
-            
+
             keyGbc.gridx = 0; keyGbc.gridy = 0; keyGbc.gridwidth = 1;
             for (KeySchemaElement key : keys) {
-                String keyType = key.keyType() == KeyType.HASH ? " (Partition Key)" : " (Sort Key)";
-                keyPanel.add(new JLabel(key.attributeName() + keyType + ":"), keyGbc);
-                keyGbc.gridx = 1; keyGbc.gridwidth = 2;
-                JTextField field = new JTextField(20);
-                field.setName(key.attributeName());
-                keyPanel.add(field, keyGbc);
-                keyGbc.gridx = 0; keyGbc.gridy++; keyGbc.gridwidth = 1;
+                if (key.keyType() == KeyType.HASH) {
+                    addPartitionKeyConditionRow(keyPanel, keyGbc, key.attributeName());
+                } else {
+                    addSortKeyConditionRow(keyPanel, keyGbc, key.attributeName());
+                }
             }
-            
+
             keyPanel.revalidate();
             keyPanel.repaint();
         });
-        
+
         // Trigger initial setup
         indexCombo.setSelectedIndex(0);
         
@@ -946,8 +960,13 @@ public class DynamoDBBrowser extends JFrame {
         
         executeButton.addActionListener(e -> {
             IndexOption selected = (IndexOption) indexCombo.getSelectedItem();
-            executeQuery(selected, keyPanel);
-            dialog.dispose();
+            // Only close the dialog once we actually have results to show - on a validation
+            // error, a failed query, or a query that matched nothing, stay open (so the user
+            // can adjust and retry without losing their index/key selections) and leave
+            // whatever's already in the grid untouched.
+            if (executeQuery(selected, keyPanel)) {
+                dialog.dispose();
+            }
         });
         
         cancelButton.addActionListener(e -> dialog.dispose());
@@ -958,7 +977,122 @@ public class DynamoDBBrowser extends JFrame {
         
         dialog.setVisible(true);
     }
-    
+
+    // Suffixes distinguishing the sort key's operator combo and "to" (BETWEEN) field from its
+    // main value field, which is named after the attribute itself (matching the partition key
+    // field's naming, for backward-compatible lookup).
+    private static final String SORT_KEY_OPERATOR_SUFFIX = "__operator";
+    private static final String SORT_KEY_TO_SUFFIX = "__to";
+
+    // DynamoDB Query only allows the partition key to be an exact match; the sort key can use
+    // any of these. (begins_with only applies to String/Binary sort keys - DynamoDB itself
+    // rejects it for a Number sort key, surfaced via the existing SdkException handling.)
+    // Package-private (rather than private) so tests in this package can reference it directly.
+    enum SortKeyOperator {
+        EQ("="),
+        LT("<"),
+        LE("<="),
+        GT(">"),
+        GE(">="),
+        BEGINS_WITH("begins with"),
+        BETWEEN("between");
+
+        private final String label;
+
+        SortKeyOperator(String label) {
+            this.label = label;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    private void addPartitionKeyConditionRow(JPanel keyPanel, GridBagConstraints keyGbc, String attributeName) {
+        keyPanel.add(new JLabel(attributeName + " (Partition Key):"), keyGbc);
+        keyGbc.gridx = 1; keyGbc.gridwidth = 2;
+        JTextField field = new JTextField(20);
+        field.setName(attributeName);
+        keyPanel.add(field, keyGbc);
+        keyGbc.gridx = 0; keyGbc.gridy++; keyGbc.gridwidth = 1;
+
+        addSampleValuesHint(keyPanel, keyGbc, attributeName);
+    }
+
+    // Adds a sort key condition row to keyPanel: an operator dropdown, one value field, and a
+    // second "to" value field that's only enabled when BETWEEN is selected.
+    private void addSortKeyConditionRow(JPanel keyPanel, GridBagConstraints keyGbc, String attributeName) {
+        keyPanel.add(new JLabel(attributeName + " (Sort Key):"), keyGbc);
+
+        keyGbc.gridx = 1; keyGbc.gridwidth = 1;
+        JComboBox<SortKeyOperator> operatorCombo = new JComboBox<>(SortKeyOperator.values());
+        operatorCombo.setName(attributeName + SORT_KEY_OPERATOR_SUFFIX);
+        keyPanel.add(operatorCombo, keyGbc);
+
+        keyGbc.gridx = 2; keyGbc.gridwidth = 1;
+        JTextField valueField = new JTextField(10);
+        valueField.setName(attributeName);
+        keyPanel.add(valueField, keyGbc);
+
+        keyGbc.gridx = 0; keyGbc.gridy++; keyGbc.gridwidth = 1;
+        JLabel toLabel = new JLabel("  and:");
+        keyGbc.gridx = 1; keyGbc.gridwidth = 1;
+        keyPanel.add(toLabel, keyGbc);
+
+        keyGbc.gridx = 2; keyGbc.gridwidth = 1;
+        JTextField toField = new JTextField(10);
+        toField.setName(attributeName + SORT_KEY_TO_SUFFIX);
+        keyPanel.add(toField, keyGbc);
+
+        Runnable updateToFieldVisibility = () -> {
+            boolean isBetween = operatorCombo.getSelectedItem() == SortKeyOperator.BETWEEN;
+            toLabel.setVisible(isBetween);
+            toField.setVisible(isBetween);
+        };
+        updateToFieldVisibility.run();
+        operatorCombo.addActionListener(e -> {
+            updateToFieldVisibility.run();
+            keyPanel.revalidate();
+            keyPanel.repaint();
+        });
+
+        keyGbc.gridx = 0; keyGbc.gridy++; keyGbc.gridwidth = 1;
+
+        addSampleValuesHint(keyPanel, keyGbc, attributeName);
+    }
+
+    // Shows a few example values for the given key attribute, drawn from whatever's currently
+    // loaded in allRecords, so the user has some idea what to type instead of pure guesswork
+    // (single-table-design PK/SK values are often prefixed/composite, e.g. "CLIENT#123").
+    private void addSampleValuesHint(JPanel keyPanel, GridBagConstraints keyGbc, String attributeName) {
+        List<String> samples = sampleAttributeValues(attributeName, 3);
+        if (samples.isEmpty()) {
+            return;
+        }
+
+        JLabel hint = new JLabel("e.g. " + String.join(",  ", samples));
+        hint.setForeground(Color.GRAY);
+        hint.setFont(hint.getFont().deriveFont(Font.ITALIC, hint.getFont().getSize2D() - 1f));
+        keyGbc.gridx = 1; keyGbc.gridwidth = 2;
+        keyPanel.add(hint, keyGbc);
+        keyGbc.gridx = 0; keyGbc.gridy++; keyGbc.gridwidth = 1;
+    }
+
+    private List<String> sampleAttributeValues(String attributeName, int maxSamples) {
+        LinkedHashSet<String> samples = new LinkedHashSet<>();
+        for (Map<String, AttributeValue> record : allRecords) {
+            AttributeValue value = record.get(attributeName);
+            if (value != null) {
+                samples.add(formatAttributeValue(value));
+            }
+            if (samples.size() >= maxSamples) {
+                break;
+            }
+        }
+        return new ArrayList<>(samples);
+    }
+
     private String buildIndexDescription(String indexName, List<KeySchemaElement> keySchema) {
         StringBuilder desc = new StringBuilder(indexName);
         desc.append(" (");
@@ -974,8 +1108,9 @@ public class DynamoDBBrowser extends JFrame {
         return desc.toString();
     }
     
-    // Helper class to store index information
-    private static class IndexOption {
+    // Helper class to store index information. Package-private (rather than private) so tests
+    // in this package can reference it directly, same rationale as ParsedTableArn above.
+    static class IndexOption {
         String name;
         String description;
         List<KeySchemaElement> keySchema;
@@ -994,77 +1129,184 @@ public class DynamoDBBrowser extends JFrame {
         }
     }
     
-    private void executeQuery(IndexOption indexOption, JPanel keyPanel) {
-        try {
-            Map<String, AttributeValue> keyConditions = new HashMap<>();
+    // Package-private (rather than private) so tests in this package can use the built
+    // expression/names/values directly after invoking buildKeyConditionExpression via reflection.
+    record KeyConditionBuild(String expression, Map<String, String> names, Map<String, AttributeValue> values) {
+    }
 
-            for (Component comp : keyPanel.getComponents()) {
-                if (comp instanceof JTextField field) {
-                    String value = field.getText().trim();
-                    if (!value.isEmpty()) {
-                        keyConditions.put(field.getName(),
-                            buildKeyAttributeValue(resolveAttributeType(field.getName()), value));
-                    }
+    // Reads the key condition fields out of keyPanel (built by showQueryDialog's index-selection
+    // listener/addSortKeyConditionRow) and turns them into a DynamoDB KeyConditionExpression.
+    // Throws IllegalArgumentException with a user-facing message for missing/invalid input.
+    private KeyConditionBuild buildKeyConditionExpression(IndexOption indexOption, JPanel keyPanel) {
+        List<String> conditions = new ArrayList<>();
+        Map<String, String> names = new HashMap<>();
+        Map<String, AttributeValue> values = new HashMap<>();
+        int placeholderIndex = 0;
+
+        for (KeySchemaElement key : indexOption.keySchema) {
+            String attributeName = key.attributeName();
+            JTextField valueField = findFieldByName(keyPanel, attributeName);
+            String rawValue = valueField != null ? valueField.getText().trim() : "";
+
+            String namePlaceholder = "#k" + placeholderIndex;
+            String valuePlaceholder = ":v" + placeholderIndex;
+
+            if (key.keyType() == KeyType.HASH) {
+                if (rawValue.isEmpty()) {
+                    throw new IllegalArgumentException("Please provide the partition key.");
                 }
+                names.put(namePlaceholder, attributeName);
+                values.put(valuePlaceholder, buildKeyAttributeValue(resolveAttributeType(attributeName), rawValue));
+                conditions.add(namePlaceholder + " = " + valuePlaceholder);
+                placeholderIndex++;
+                continue;
             }
 
-            if (keyConditions.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Please provide at least the partition key.");
-                return;
+            // Sort key is optional.
+            if (rawValue.isEmpty()) {
+                continue;
             }
-            
-            QueryRequest.Builder queryBuilder = QueryRequest.builder()
-                .tableName(tableName)
-                .limit(dynamoQueryLimit);
-            
-            // Build key condition expression
-            List<String> conditions = new ArrayList<>();
-            Map<String, String> names = new HashMap<>();
-            Map<String, AttributeValue> values = new HashMap<>();
-            
-            int i = 0;
-            for (Map.Entry<String, AttributeValue> entry : keyConditions.entrySet()) {
-                String placeholder = "#k" + i;
-                String valuePlaceholder = ":v" + i;
-                names.put(placeholder, entry.getKey());
-                values.put(valuePlaceholder, entry.getValue());
-                conditions.add(placeholder + " = " + valuePlaceholder);
-                i++;
-            }
-            
-            queryBuilder.keyConditionExpression(String.join(" AND ", conditions))
-                .expressionAttributeNames(names)
-                .expressionAttributeValues(values);
-            
-            if (indexOption.isGSI) {
-                queryBuilder.indexName(indexOption.name);
-            }
-            
-            QueryResponse response = dynamoDb.query(queryBuilder.build());
-            
-            // Clear and display results
-            allRecords.clear();
-            tableModel.setRowCount(0);
-            lastEvaluatedKey = response.lastEvaluatedKey();
-            
-            if (response.items().isEmpty()) {
-                JOptionPane.showMessageDialog(this, "No records found matching query.");
+
+            JComboBox<SortKeyOperator> operatorCombo = findOperatorComboByName(keyPanel, attributeName);
+            SortKeyOperator operator = operatorCombo != null
+                ? (SortKeyOperator) operatorCombo.getSelectedItem()
+                : SortKeyOperator.EQ;
+
+            names.put(namePlaceholder, attributeName);
+            values.put(valuePlaceholder, buildKeyAttributeValue(resolveAttributeType(attributeName), rawValue));
+            placeholderIndex++;
+
+            if (operator == SortKeyOperator.BETWEEN) {
+                JTextField toField = findFieldByName(keyPanel, attributeName + SORT_KEY_TO_SUFFIX);
+                String toValue = toField != null ? toField.getText().trim() : "";
+                if (toValue.isEmpty()) {
+                    throw new IllegalArgumentException("Please provide both values for a BETWEEN condition.");
+                }
+                String toPlaceholder = ":v" + placeholderIndex;
+                values.put(toPlaceholder, buildKeyAttributeValue(resolveAttributeType(attributeName), toValue));
+                placeholderIndex++;
+                conditions.add(namePlaceholder + " BETWEEN " + valuePlaceholder + " AND " + toPlaceholder);
+            } else if (operator == SortKeyOperator.BEGINS_WITH) {
+                conditions.add("begins_with(" + namePlaceholder + ", " + valuePlaceholder + ")");
             } else {
-                for (Map<String, AttributeValue> item : response.items()) {
-                    allRecords.add(item);
-                    addRecordToTable(item);
-                }
-                loadMoreButton.setEnabled(false); // Query results don't support load more in this simple version
+                conditions.add(namePlaceholder + " " + operator + " " + valuePlaceholder);
             }
-            
+        }
+
+        if (conditions.isEmpty()) {
+            throw new IllegalArgumentException("Please provide at least the partition key.");
+        }
+
+        return new KeyConditionBuild(String.join(" AND ", conditions), names, values);
+    }
+
+    // Runs the query and, only if it actually returns results, takes over the grid (clearing
+    // the current rows and switching into query mode). Returns true in that case (so the
+    // caller knows it's safe to close the Query Records dialog), false otherwise - a
+    // validation error, a failed query, or one that matched nothing all leave the grid and
+    // dialog exactly as they were, so the user can adjust and retry without losing anything.
+    private boolean executeQuery(IndexOption indexOption, JPanel keyPanel) {
+        KeyConditionBuild build;
+        try {
+            build = buildKeyConditionExpression(indexOption, keyPanel);
         } catch (IllegalArgumentException e) {
-            JOptionPane.showMessageDialog(this,
-                e.getMessage(),
-                "Unsupported Key Type", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, e.getMessage(), "Invalid Query", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        String indexName = indexOption.isGSI ? indexOption.name : null;
+        QueryResponse response;
+        try {
+            response = dynamoDb.query(buildQueryRequest(build.expression(), build.names(), build.values(),
+                indexName, null));
         } catch (SdkException e) {
             JOptionPane.showMessageDialog(this,
                 "Query error: " + e.getMessage(),
                 "Query Error", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        if (response.items().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No records found matching query.");
+            return false;
+        }
+
+        activeQueryKeyConditionExpression = build.expression();
+        activeQueryExpressionNames = build.names();
+        activeQueryExpressionValues = build.values();
+        activeQueryIndexName = indexName;
+        queryMode = true;
+
+        allRecords.clear();
+        tableModel.setRowCount(0);
+        for (Map<String, AttributeValue> item : response.items()) {
+            allRecords.add(item);
+            addRecordToTable(item);
+        }
+
+        lastEvaluatedKey = response.lastEvaluatedKey();
+        loadMoreButton.setEnabled(lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty());
+        return true;
+    }
+
+    private JTextField findFieldByName(JPanel panel, String name) {
+        for (Component comp : panel.getComponents()) {
+            if (comp instanceof JTextField field && name.equals(field.getName())) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private JComboBox<SortKeyOperator> findOperatorComboByName(JPanel panel, String attributeName) {
+        String targetName = attributeName + SORT_KEY_OPERATOR_SUFFIX;
+        for (Component comp : panel.getComponents()) {
+            if (comp instanceof JComboBox<?> combo && targetName.equals(combo.getName())) {
+                return (JComboBox<SortKeyOperator>) combo;
+            }
+        }
+        return null;
+    }
+
+    private QueryRequest buildQueryRequest(String keyConditionExpression, Map<String, String> names,
+            Map<String, AttributeValue> values, String indexName, Map<String, AttributeValue> exclusiveStartKey) {
+        QueryRequest.Builder builder = QueryRequest.builder()
+            .tableName(tableName)
+            .limit(dynamoQueryLimit)
+            .keyConditionExpression(keyConditionExpression)
+            .expressionAttributeNames(names)
+            .expressionAttributeValues(values);
+
+        if (indexName != null) {
+            builder.indexName(indexName);
+        }
+        if (exclusiveStartKey != null) {
+            builder.exclusiveStartKey(exclusiveStartKey);
+        }
+        return builder.build();
+    }
+
+    // Fetches the next page for the query already active in the grid (see executeQuery),
+    // the same way loadMoreRecords does for a Scan.
+    private void loadMoreQueryResults() {
+        try {
+            QueryRequest request = buildQueryRequest(activeQueryKeyConditionExpression,
+                activeQueryExpressionNames, activeQueryExpressionValues, activeQueryIndexName, lastEvaluatedKey);
+            QueryResponse response = dynamoDb.query(request);
+
+            for (Map<String, AttributeValue> item : response.items()) {
+                allRecords.add(item);
+                addRecordToTable(item);
+            }
+
+            lastEvaluatedKey = response.lastEvaluatedKey();
+            loadMoreButton.setEnabled(lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty());
+
+        } catch (SdkException e) {
+            JOptionPane.showMessageDialog(this,
+                "Error loading more records: " + e.getMessage(),
+                "Load Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
