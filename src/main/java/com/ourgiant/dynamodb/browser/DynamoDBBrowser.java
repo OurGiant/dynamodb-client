@@ -653,11 +653,11 @@ public class DynamoDBBrowser extends JFrame {
                 return;
             }
             
-            // Setup columns on first load
+            // Set up the primary key column(s) on first load.
             if (allRecords.isEmpty()) {
-                setupTableColumns(items.getFirst());
+                setupTableColumns();
             }
-            
+
             // Add records
             for (Map<String, AttributeValue> item : items) {
                 allRecords.add(item);
@@ -674,37 +674,29 @@ public class DynamoDBBrowser extends JFrame {
         }
     }
     
-    private void setupTableColumns(Map<String, AttributeValue> sampleItem) {
-        // Get primary key attributes
-        List<String> keyAttributes = new ArrayList<>();
+    private void setupTableColumns() {
+        // Show only the primary key column(s) in the summary grid - every item has these,
+        // regardless of shape, so the columns are stable across refreshes and don't depend on
+        // which item happens to load first. Single-table-design schemas can have wildly
+        // different attributes per item; cramming a union of all of them into the grid turns
+        // out to be more noise than signal in practice. Full detail (any attribute, for one
+        // record) is still available via double-click -> Record Details.
         for (KeySchemaElement key : tableDescription.keySchema()) {
-            keyAttributes.add(key.attributeName());
-        }
-        
-        // Add primary key columns first
-        for (String keyAttr : keyAttributes) {
-            tableModel.addColumn(keyAttr + " (PK)");
-        }
-        
-        // Add a few more columns for context (up to 3 additional)
-        int additionalCols = 0;
-        for (String attr : sampleItem.keySet()) {
-            if (!keyAttributes.contains(attr) && additionalCols < 3) {
-                tableModel.addColumn(attr);
-                additionalCols++;
-            }
+            tableModel.addColumn(key.attributeName() + " (PK)");
         }
     }
-    
+
+    private String columnAttributeName(int columnIndex) {
+        return tableModel.getColumnName(columnIndex).replace(" (PK)", "");
+    }
+
     private void addRecordToTable(Map<String, AttributeValue> item) {
         Vector<String> row = new Vector<>();
-        
         for (int i = 0; i < tableModel.getColumnCount(); i++) {
-            String colName = tableModel.getColumnName(i).replace(" (PK)", "");
-            AttributeValue value = item.get(colName);
+            AttributeValue value = item.get(columnAttributeName(i));
             row.add(formatAttributeValue(value));
         }
-        
+
         tableModel.addRow(row);
     }
     
