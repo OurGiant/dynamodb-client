@@ -18,17 +18,39 @@
         <maven.compiler.target>24</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>24</maven.compiler.release>
-        <aws.sdk.version>2.40.17</aws.sdk.version>
+        <aws.sdk.version>2.46.21</aws.sdk.version>
         <junit.version>5.11.4</junit.version>
         <mockito.version>5.15.2</mockito.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <logback.version>1.5.37</logback.version>
     </properties>
 
     <dependencies>
-        <!-- AWS SDK for DynamoDB -->
+        <!-- AWS SDK for DynamoDB. Excludes netty-nio-client: that's only needed for the
+             async client (DynamoDbAsyncClient), which this app never uses (only the
+             synchronous DynamoDbClient/StsClient, backed by apache5-client) - excluding it
+             drops a large, otherwise-unused dependency subtree (and its CVEs) entirely. -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>dynamodb</artifactId>
             <version>${aws.sdk.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Pins the transitive httpcore5-h2 pulled in by the AWS SDK's apache5-client
+             (via dynamodb above) to a version past SNYK-JAVA-ORGAPACHEHTTPCOMPONENTSCORE5-17817217
+             and -17817218 (resource-exhaustion issues, fixed in 5.4.2+); the AWS SDK still
+             declares 5.4. -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.core5</groupId>
+            <artifactId>httpcore5-h2</artifactId>
+            <version>5.4.3</version>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- AWS SDK Core (for credentials and regions) -->
@@ -38,11 +60,32 @@
             <version>${aws.sdk.version}</version>
         </dependency>
 
-        <!-- AWS SDK STS (for verifying whether a profile's credentials are active) -->
+        <!-- AWS SDK STS (for verifying whether a profile's credentials are active).
+             Excludes netty-nio-client for the same reason as the dynamodb dependency above:
+             only the synchronous StsClient is used. -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sts</artifactId>
             <version>${aws.sdk.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Logging: pinned explicitly (rather than left to whatever the AWS SDK pulls in
+             transitively) so slf4j-api and logback-classic resolve to a known-compatible pair. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
         </dependency>
 
         <!-- Test dependencies -->
