@@ -10,21 +10,38 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-// Reads AWS profile names and per-profile region from ~/.aws/credentials and ~/.aws/config.
+// Reads AWS profile names and per-profile region from the AWS config directory
+// (normally ~/.aws, overridable - see configDir()).
 public final class AwsProfiles {
 
     private static final Logger log = LoggerFactory.getLogger(AwsProfiles.class);
 
+    // Overridable via a surefire-set system property (see pom.xml's <systemPropertyVariables>),
+    // so tests never touch the real developer's ~/.aws/credentials or ~/.aws/config - mirrors
+    // kiro-control-panel's kiro.control.panel.changeLogFile pattern: a scoped override the
+    // production code itself understands, rather than tests reaching in and swapping the
+    // global user.home system property.
+    private static final String CONFIG_DIR_OVERRIDE_PROPERTY = "dynamodb.browser.awsConfigDir";
+
     private AwsProfiles() {
+    }
+
+    private static File configDir() {
+        String override = System.getProperty(CONFIG_DIR_OVERRIDE_PROPERTY);
+        if (override != null && !override.isBlank()) {
+            return new File(override);
+        }
+        return new File(System.getProperty("user.home"), ".aws");
     }
 
     public static List<String> readAwsProfiles() {
         List<String> profiles = new ArrayList<>();
         profiles.add("default"); // Always include default
 
+        File configDir = configDir();
+
         // Try to read from .aws/credentials file
-        String userHome = System.getProperty("user.home");
-        File credentialsFile = new File(userHome, ".aws/credentials");
+        File credentialsFile = new File(configDir, "credentials");
 
         if (credentialsFile.exists()) {
             try (BufferedReader reader = new BufferedReader(new FileReader(credentialsFile))) {
@@ -44,7 +61,7 @@ public final class AwsProfiles {
         }
 
         // Also try .aws/config file
-        File configFile = new File(userHome, ".aws/config");
+        File configFile = new File(configDir, "config");
         if (configFile.exists()) {
             try (BufferedReader reader = new BufferedReader(new FileReader(configFile))) {
                 String line;
@@ -70,11 +87,10 @@ public final class AwsProfiles {
         return profiles;
     }
 
-    // Resolves the region to use for a profile: its ~/.aws/config entry, then the
+    // Resolves the region to use for a profile: its .aws/config entry, then the
     // standard AWS region environment variables, then a default.
     public static String resolveRegionForProfile(String profile) {
-        String userHome = System.getProperty("user.home");
-        File configFile = new File(userHome, ".aws/config");
+        File configFile = new File(configDir(), "config");
 
         if (configFile.exists()) {
             String sectionHeader = "default".equals(profile) ? "[default]" : "[profile " + profile + "]";

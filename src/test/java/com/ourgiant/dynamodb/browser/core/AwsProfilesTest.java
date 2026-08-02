@@ -1,34 +1,39 @@
 package com.ourgiant.dynamodb.browser.core;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class AwsProfilesTest {
 
-    private String originalUserHome;
-
-    @TempDir
-    Path fakeHome;
+    private Path configDir;
 
     @BeforeEach
-    void setUp() {
-        originalUserHome = System.getProperty("user.home");
-        System.setProperty("user.home", fakeHome.toString());
-    }
+    void setUp() throws IOException {
+        String override = System.getProperty("dynamodb.browser.awsConfigDir");
+        assertNotNull(override, "surefire must set dynamodb.browser.awsConfigDir - see pom.xml");
+        configDir = Paths.get(override);
 
-    @AfterEach
-    void tearDown() {
-        System.setProperty("user.home", originalUserHome);
+        // Reset between tests: each test starts from an empty config dir so results don't
+        // depend on execution order or leak into other tests.
+        if (Files.isDirectory(configDir)) {
+            try (var entries = Files.list(configDir)) {
+                for (Path entry : entries.toList()) {
+                    Files.delete(entry);
+                }
+            }
+        } else {
+            Files.createDirectories(configDir);
+        }
     }
 
     @Test
@@ -38,9 +43,7 @@ class AwsProfilesTest {
 
     @Test
     void mergesProfilesFromCredentialsAndConfigWithoutDuplicates() throws IOException {
-        Path awsDir = Files.createDirectory(fakeHome.resolve(".aws"));
-
-        Files.writeString(awsDir.resolve("credentials"), """
+        Files.writeString(configDir.resolve("credentials"), """
             [default]
             aws_access_key_id = x
             aws_secret_access_key = y
@@ -50,7 +53,7 @@ class AwsProfilesTest {
             aws_secret_access_key = b
             """);
 
-        Files.writeString(awsDir.resolve("config"), """
+        Files.writeString(configDir.resolve("config"), """
             [default]
             region = us-east-1
 
@@ -98,7 +101,6 @@ class AwsProfilesTest {
     }
 
     private void writeConfig(String content) throws IOException {
-        Path awsDir = Files.createDirectory(fakeHome.resolve(".aws"));
-        Files.writeString(awsDir.resolve("config"), content);
+        Files.writeString(configDir.resolve("config"), content);
     }
 }
