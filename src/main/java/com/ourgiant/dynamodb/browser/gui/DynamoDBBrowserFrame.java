@@ -10,6 +10,7 @@ import com.ourgiant.dynamodb.browser.core.KeyConditionBuilder;
 import com.ourgiant.dynamodb.browser.core.QueryRequests;
 import com.ourgiant.dynamodb.browser.core.RecordGridModel;
 import com.ourgiant.dynamodb.browser.ThemeManager;
+import com.ourgiant.dynamodb.browser.util.AppVersion;
 import com.ourgiant.dynamodb.browser.model.IndexOption;
 import com.ourgiant.dynamodb.browser.model.KeyConditionBuild;
 import com.ourgiant.dynamodb.browser.model.ParsedTableArn;
@@ -387,6 +388,14 @@ public class DynamoDBBrowserFrame extends JFrame {
         }
         viewMenu.add(themeMenu);
         menuBar.add(viewMenu);
+
+        JMenu helpMenu = new JMenu("Help");
+        JMenuItem aboutItem = new JMenuItem("About");
+        aboutItem.addActionListener(e -> JOptionPane.showMessageDialog(this,
+            "DynamoDB Browser\nVersion " + AppVersion.resolve(),
+            "About DynamoDB Browser", JOptionPane.INFORMATION_MESSAGE));
+        helpMenu.add(aboutItem);
+        menuBar.add(helpMenu);
 
         setJMenuBar(menuBar);
 
