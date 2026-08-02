@@ -9,6 +9,7 @@ import com.ourgiant.dynamodb.browser.core.IndexDescriptions;
 import com.ourgiant.dynamodb.browser.core.KeyConditionBuilder;
 import com.ourgiant.dynamodb.browser.core.QueryRequests;
 import com.ourgiant.dynamodb.browser.core.RecordGridModel;
+import com.ourgiant.dynamodb.browser.ThemeManager;
 import com.ourgiant.dynamodb.browser.model.IndexOption;
 import com.ourgiant.dynamodb.browser.model.KeyConditionBuild;
 import com.ourgiant.dynamodb.browser.model.ParsedTableArn;
@@ -376,6 +377,17 @@ public class DynamoDBBrowserFrame extends JFrame {
         });
         fileMenu.add(exitItem);
         menuBar.add(fileMenu);
+
+        JMenu viewMenu = new JMenu("View");
+        JMenu themeMenu = new JMenu("Theme");
+        for (String themeName : ThemeManager.getAvailableThemeNames()) {
+            JMenuItem item = new JMenuItem(themeName);
+            item.addActionListener(e -> ThemeManager.applyTheme(themeName));
+            themeMenu.add(item);
+        }
+        viewMenu.add(themeMenu);
+        menuBar.add(viewMenu);
+
         setJMenuBar(menuBar);
 
         // Top panel with buttons
