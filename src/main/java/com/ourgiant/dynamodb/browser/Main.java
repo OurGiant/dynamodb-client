@@ -19,7 +19,9 @@ public class Main {
         SwingUtilities.invokeLater(() -> {
             try {
                 log.debug("Initializing UI...");
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                if (!ThemeManager.applyTheme("Flat Light")) {
+                    UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                }
 
                 DynamoDBBrowserFrame browser = new DynamoDBBrowserFrame();
                 browser.setVisible(true);
