@@ -7,7 +7,7 @@
 
     <groupId>com.ourgiant.dynamodb</groupId>
     <artifactId>dynamodb-browser</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <name>DynamoDB Browser</name>
@@ -107,14 +107,6 @@
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- Instantiates DynamoDBBrowser without running its (dialog-showing) constructor,
-             so its private, self-contained helper methods can be tested via reflection. -->
-        <dependency>
-            <groupId>org.objenesis</groupId>
-            <artifactId>objenesis</artifactId>
-            <version>3.3</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -164,7 +156,7 @@
                             </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.ourgiant.dynamodb.browser.DynamoDBBrowser</mainClass>
+                                    <mainClass>com.ourgiant.dynamodb.browser.Main</mainClass>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">

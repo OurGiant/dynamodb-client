@@ -1,4 +1,4 @@
-package com.ourgiant.dynamodb.browser;
+package com.ourgiant.dynamodb.browser.core;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -9,12 +9,12 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class RegionResolutionTest {
+class AwsProfilesTest {
 
-    private DynamoDBBrowser browser;
     private String originalUserHome;
 
     @TempDir
@@ -22,7 +22,6 @@ class RegionResolutionTest {
 
     @BeforeEach
     void setUp() {
-        browser = ReflectionSupport.newBrowserInstance();
         originalUserHome = System.getProperty("user.home");
         System.setProperty("user.home", fakeHome.toString());
     }
@@ -32,9 +31,37 @@ class RegionResolutionTest {
         System.setProperty("user.home", originalUserHome);
     }
 
-    private String resolveRegion(String profile) {
-        return (String) ReflectionSupport.invoke(browser, "resolveRegionForProfile",
-            new Class<?>[]{String.class}, profile);
+    @Test
+    void alwaysIncludesDefaultEvenWithNoFiles() {
+        assertEquals(List.of("default"), AwsProfiles.readAwsProfiles());
+    }
+
+    @Test
+    void mergesProfilesFromCredentialsAndConfigWithoutDuplicates() throws IOException {
+        Path awsDir = Files.createDirectory(fakeHome.resolve(".aws"));
+
+        Files.writeString(awsDir.resolve("credentials"), """
+            [default]
+            aws_access_key_id = x
+            aws_secret_access_key = y
+
+            [profileA]
+            aws_access_key_id = a
+            aws_secret_access_key = b
+            """);
+
+        Files.writeString(awsDir.resolve("config"), """
+            [default]
+            region = us-east-1
+
+            [profile confA]
+            region = us-east-1
+
+            [rawSection]
+            some_key = val
+            """);
+
+        assertEquals(List.of("default", "profileA", "confA", "rawSection"), AwsProfiles.readAwsProfiles());
     }
 
     @Test
@@ -47,7 +74,7 @@ class RegionResolutionTest {
             region = ap-southeast-2
             """);
 
-        assertEquals("ap-southeast-2", resolveRegion("confA"));
+        assertEquals("ap-southeast-2", AwsProfiles.resolveRegionForProfile("confA"));
     }
 
     @Test
@@ -57,7 +84,7 @@ class RegionResolutionTest {
             region = eu-west-1
             """);
 
-        assertEquals("eu-west-1", resolveRegion("default"));
+        assertEquals("eu-west-1", AwsProfiles.resolveRegionForProfile("default"));
     }
 
     @Test
@@ -67,7 +94,7 @@ class RegionResolutionTest {
         Assumptions.assumeTrue(System.getenv("AWS_REGION") == null);
         Assumptions.assumeTrue(System.getenv("AWS_DEFAULT_REGION") == null);
 
-        assertEquals("us-east-1", resolveRegion("no-such-profile"));
+        assertEquals("us-east-1", AwsProfiles.resolveRegionForProfile("no-such-profile"));
     }
 
     private void writeConfig(String content) throws IOException {
