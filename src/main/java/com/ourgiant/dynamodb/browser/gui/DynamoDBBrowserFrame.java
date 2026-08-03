@@ -25,7 +25,7 @@ import java.awt.event.*;
 import java.util.*;
 import java.util.List;
 import java.util.prefs.Preferences;
-import java.awt.image.BufferedImage;
+import java.net.URL;
 import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -60,18 +60,22 @@ public class DynamoDBBrowserFrame extends JFrame {
     private String activeQueryIndexName;
     private final Integer dynamoQueryLimit = (Integer) 50;
 
-    private Image createAppIcon() {
-        BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2d = icon.createGraphics();
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g2d.setColor(new Color(70, 130, 180));
-        g2d.fillRect(0, 0, 16, 16);
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 10));
-        g2d.drawString("D", 5, 12);
-        g2d.dispose();
-        return icon;
+    /**
+     * Scaled copies of the real app icon (not a hand-drawn placeholder) at the sizes window
+     * managers/taskbars actually pick from, via setIconImages -- letting the OS choose the best
+     * fit instead of stretching one bitmap.
+     */
+    private List<Image> loadAppIcons() {
+        URL iconUrl = DynamoDBBrowserFrame.class.getResource("/app-icon.png");
+        if (iconUrl == null) {
+            return List.of();
+        }
+        Image source = new ImageIcon(iconUrl).getImage();
+        List<Image> icons = new ArrayList<>();
+        for (int size : new int[]{16, 32, 48, 64, 128}) {
+            icons.add(source.getScaledInstance(size, size, Image.SCALE_SMOOTH));
+        }
+        return icons;
     }
 
     public DynamoDBBrowserFrame() {
@@ -82,9 +86,9 @@ public class DynamoDBBrowserFrame extends JFrame {
         setLocationRelativeTo(null);
 
         try {
-            setIconImage(createAppIcon());
+            setIconImages(loadAppIcons());
         } catch (Exception e) {
-            // Ignore if icon creation fails
+            // Ignore if icon loading fails
         }
 
         try {
