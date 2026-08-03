@@ -110,7 +110,11 @@ jobs:
             --app-version ${{ steps.version.outputs.version }} \
             --vendor OurGiant \
             --type deb \
-            --icon src/main/resources/app-icon.png \
+            --icon src/packaging/linux/app-icon.png \
+            --description "Java Swing desktop app for browsing and querying AWS DynamoDB tables" \
+            --linux-menu-group "Development;Utility;" \
+            --linux-shortcut \
+            --resource-dir src/packaging/linux \
             --dest installer-output
 
       - name: Upload Linux artifacts
