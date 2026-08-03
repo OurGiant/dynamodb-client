@@ -64,3 +64,11 @@ Thumbs.db
 *.tmp
 *.swp
 *.bak
+
+# AWS credentials/config, in case one ever ends up copied into the repo tree by mistake -
+# this app is the one sibling project that actually reads a real ~/.aws profile.
+.aws/
+*.pem
+aws_credentials
+credentials.csv
+*.aws-credentials
