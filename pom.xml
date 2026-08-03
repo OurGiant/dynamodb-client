@@ -7,7 +7,7 @@
 
     <groupId>com.ourgiant.dynamodb</groupId>
     <artifactId>dynamodb-browser</artifactId>
-    <version>1.0.8</version>
+    <version>1.0.9</version>
     <packaging>jar</packaging>
 
     <name>DynamoDB Browser</name>
@@ -24,6 +24,7 @@
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.37</logback.version>
         <flatlaf.version>3.7.2</flatlaf.version>
+        <jackson.version>2.22.1</jackson.version>
     </properties>
 
     <dependencies>
@@ -105,6 +106,15 @@
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>${logback.version}</version>
+        </dependency>
+
+        <!-- Parses the GitHub releases API response for the About dialog's update check.
+             The AWS SDK's transitive Jackson is shaded under software.amazon.awssdk.thirdparty,
+             not usable as com.fasterxml.jackson, so this is pulled in explicitly. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
         </dependency>
 
         <!-- Test dependencies -->
