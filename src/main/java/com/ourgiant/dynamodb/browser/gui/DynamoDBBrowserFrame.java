@@ -11,6 +11,7 @@ import com.ourgiant.dynamodb.browser.core.QueryRequests;
 import com.ourgiant.dynamodb.browser.core.RecordGridModel;
 import com.ourgiant.dynamodb.browser.ThemeManager;
 import com.ourgiant.dynamodb.browser.util.AppVersion;
+import com.ourgiant.dynamodb.browser.util.UpdateChecker;
 import com.ourgiant.dynamodb.browser.model.IndexOption;
 import com.ourgiant.dynamodb.browser.model.KeyConditionBuild;
 import com.ourgiant.dynamodb.browser.model.ParsedTableArn;
@@ -101,6 +102,7 @@ public class DynamoDBBrowserFrame extends JFrame {
                 log.info("Connection dialog cancelled. Exiting.");
                 System.exit(0);
             }
+            checkForUpdateAndNotifyIfNewer();
         } catch (Exception e) {
             log.error("Error initializing application", e);
             JOptionPane.showMessageDialog(this,
@@ -109,6 +111,44 @@ public class DynamoDBBrowserFrame extends JFrame {
                 JOptionPane.ERROR_MESSAGE);
             System.exit(1);
         }
+    }
+
+    /**
+     * Fires from the constructor, after startup, inside its own SwingWorker so launch is never
+     * delayed by network I/O. Dedupes via a "last notified version" preference so the same
+     * available version is announced once, not on every launch.
+     */
+    private void checkForUpdateAndNotifyIfNewer() {
+        SwingWorker<Optional<UpdateChecker.ReleaseInfo>, Void> worker = new SwingWorker<>() {
+            @Override
+            protected Optional<UpdateChecker.ReleaseInfo> doInBackground() {
+                return UpdateChecker.fetchLatestRelease();
+            }
+
+            @Override
+            protected void done() {
+                Optional<UpdateChecker.ReleaseInfo> release;
+                try {
+                    release = get();
+                } catch (Exception e) {
+                    log.warn("Silent startup update check failed", e);
+                    return;
+                }
+                if (release.isEmpty()) {
+                    return;
+                }
+                UpdateChecker.ReleaseInfo info = release.get();
+                if (!UpdateChecker.isNewerVersion(info.version(), AppVersion.resolve())) {
+                    return;
+                }
+                if (info.version().equals(prefs.get("lastNotifiedUpdateVersion", null))) {
+                    return;
+                }
+                prefs.put("lastNotifiedUpdateVersion", info.version());
+                new AboutDialog(DynamoDBBrowserFrame.this, info).setVisible(true);
+            }
+        };
+        worker.execute();
     }
 
     private boolean showConnectionDialog(String defaultArn, String defaultProfile) {
@@ -391,9 +431,7 @@ public class DynamoDBBrowserFrame extends JFrame {
 
         JMenu helpMenu = new JMenu("Help");
         JMenuItem aboutItem = new JMenuItem("About");
-        aboutItem.addActionListener(e -> JOptionPane.showMessageDialog(this,
-            "DynamoDB Browser\nVersion " + AppVersion.resolve(),
-            "About DynamoDB Browser", JOptionPane.INFORMATION_MESSAGE));
+        aboutItem.addActionListener(e -> new AboutDialog(this).setVisible(true));
         helpMenu.add(aboutItem);
         menuBar.add(helpMenu);
 
