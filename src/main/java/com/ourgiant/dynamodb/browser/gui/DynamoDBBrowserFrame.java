@@ -1,5 +1,6 @@
 package com.ourgiant.dynamodb.browser.gui;
 
+import com.ourgiant.dynamodb.browser.AppPreferences;
 import com.ourgiant.dynamodb.browser.core.ArnParser;
 import com.ourgiant.dynamodb.browser.core.AttributeValueFormatter;
 import com.ourgiant.dynamodb.browser.core.AwsProfileActivityChecker;
@@ -24,7 +25,6 @@ import java.awt.*;
 import java.awt.event.*;
 import java.util.*;
 import java.util.List;
-import java.util.prefs.Preferences;
 import java.net.URL;
 import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory;
 
 public class DynamoDBBrowserFrame extends JFrame {
     private static final Logger log = LoggerFactory.getLogger(DynamoDBBrowserFrame.class);
-    private final Preferences prefs = Preferences.userNodeForPackage(DynamoDBBrowserFrame.class);
+    private final AppPreferences prefs = new AppPreferences();
     private DynamoDbClient dynamoDb;
     private String tableName;
     private String tableArn;
@@ -93,8 +93,8 @@ public class DynamoDBBrowserFrame extends JFrame {
 
         try {
             // Check if settings exist
-            String savedArn = prefs.get("tableArn", null);
-            String savedProfile = prefs.get("awsProfile", null);
+            String savedArn = prefs.getTableArn();
+            String savedProfile = prefs.getAwsProfile(null);
 
             log.debug("Saved ARN: {}", savedArn);
             log.debug("Saved profile: {}", savedProfile);
@@ -145,10 +145,10 @@ public class DynamoDBBrowserFrame extends JFrame {
                 if (!UpdateChecker.isNewerVersion(info.version(), AppVersion.resolve())) {
                     return;
                 }
-                if (info.version().equals(prefs.get("lastNotifiedUpdateVersion", null))) {
+                if (info.version().equals(prefs.getLastNotifiedUpdateVersion())) {
                     return;
                 }
-                prefs.put("lastNotifiedUpdateVersion", info.version());
+                prefs.setLastNotifiedUpdateVersion(info.version());
                 new AboutDialog(DynamoDBBrowserFrame.this, info).setVisible(true);
             }
         };
@@ -364,8 +364,8 @@ public class DynamoDBBrowserFrame extends JFrame {
                         .build()).table();
 
                 // Save settings
-                prefs.put("tableArn", tableArn);
-                prefs.put("awsProfile", profile);
+                prefs.setTableArn(tableArn);
+                prefs.setAwsProfile(profile);
 
                 connectedProfile = profile;
                 connectedAccountId = lastKnownAccountId[0];
@@ -452,7 +452,7 @@ public class DynamoDBBrowserFrame extends JFrame {
         refreshButton.addActionListener(e -> refreshRecords());
         JButton settingsButton = new JButton("Change Connection");
         settingsButton.addActionListener(e -> {
-            if (showConnectionDialog(tableArn, prefs.get("awsProfile", "default"))) {
+            if (showConnectionDialog(tableArn, prefs.getAwsProfile("default"))) {
                 refreshRecords();
             }
         });
