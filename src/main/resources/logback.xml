@@ -23,4 +23,8 @@
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
     </root>
+
+    <!-- Reduce noise from the AWS SDK's apache5-client (httpclient5/httpcore5, package
+         org.apache.hc.*) transitively pulled in via dynamodb in pom.xml -->
+    <logger name="org.apache.hc" level="WARN" />
 </configuration>
