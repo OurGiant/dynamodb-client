@@ -15,7 +15,7 @@ actually type for *this* project.
 Maven only exists in the Docker container, not on the host:
 
 ```bash
-docker exec festive_bardeen bash -c "cd /projects/dynamodb-client && mvn -q package -DskipTests"
+docker exec festive_bardeen bash -c "cd /projects/OHI/dynamodb-client && mvn -q package -DskipTests"
 ```
 
 If `festive_bardeen` doesn't respond, find the current container:

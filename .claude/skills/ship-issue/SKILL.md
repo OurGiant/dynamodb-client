@@ -8,7 +8,7 @@ description: The standard workflow for shipping a bug fix or feature to DynamoDB
 Follow `java-swing-ship-issue` (the generic workflow shared across the
 Java Swing project family) with these DynamoDB Browser specifics:
 
-- **Project path**: `/projects/dynamodb-client` inside the build container.
+- **Project path**: `/projects/OHI/dynamodb-client` inside the build container.
 - **Verify**: use this repo's own `.claude/skills/verify/SKILL.md` for
   build/launch mechanics, and note its "needs a real `~/.aws` profile to
   exercise fully" caveat before claiming a connection/query/delete change
