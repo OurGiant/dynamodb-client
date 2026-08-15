@@ -7,7 +7,7 @@
 
     <groupId>com.ourgiant.dynamodb</groupId>
     <artifactId>dynamodb-browser</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
     <packaging>jar</packaging>
 
     <name>DynamoDB Browser</name>
@@ -86,6 +86,35 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sts</artifactId>
+            <version>${aws.sdk.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- AWS SDK SSO + SSO-OIDC: ProfileCredentialsProvider resolves an SSO-based profile
+             (either the older `sso_*` inline style or a `[sso-session ...]` token-based one, as
+             used by e.g. `aws configure sso`) by reflectively loading classes from these two
+             modules. Without them on the classpath, connecting with such a profile fails at
+             runtime with "the 'sso' service module must be on the class path" even though the
+             app compiles fine - the reference is reflective, not a compile-time import. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sso</artifactId>
+            <version>${aws.sdk.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ssooidc</artifactId>
             <version>${aws.sdk.version}</version>
             <exclusions>
                 <exclusion>

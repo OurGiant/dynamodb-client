@@ -47,6 +47,7 @@ public class DynamoDBBrowserFrame extends JFrame {
     private JTable recordsTable;
     private DefaultTableModel tableModel;
     private JButton loadMoreButton;
+    private JButton viewDetailsButton;
     private Map<String, AttributeValue> lastEvaluatedKey;
     private final List<Map<String, AttributeValue>> allRecords = new ArrayList<>();
     private TableDescription tableDescription;
@@ -457,9 +458,19 @@ public class DynamoDBBrowserFrame extends JFrame {
             }
         });
 
+        // Double-click is the original way to open a record, but it depends on the OS/AWT
+        // correctly detecting two clicks within its multi-click timing window - over a remote
+        // or virtualized desktop session that window can be missed entirely, silently no-opping
+        // with no feedback. This button (and the Enter-key binding below) opens the same dialog
+        // for whatever row is currently selected, without depending on click timing at all.
+        viewDetailsButton = new JButton("View Details");
+        viewDetailsButton.setEnabled(false);
+        viewDetailsButton.addActionListener(e -> openSelectedRecordDetails());
+
         topPanel.add(new JLabel("Table: " + tableName));
         topPanel.add(queryButton);
         topPanel.add(refreshButton);
+        topPanel.add(viewDetailsButton);
         topPanel.add(settingsButton);
         add(topPanel, BorderLayout.NORTH);
 
@@ -472,15 +483,24 @@ public class DynamoDBBrowserFrame extends JFrame {
         };
         recordsTable = new JTable(tableModel);
         recordsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        recordsTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                viewDetailsButton.setEnabled(recordsTable.getSelectedRow() >= 0);
+            }
+        });
         recordsTable.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2) {
-                    int row = recordsTable.getSelectedRow();
-                    if (row >= 0) {
-                        showRecordDetails(allRecords.get(row));
-                    }
+                    openSelectedRecordDetails();
                 }
+            }
+        });
+        recordsTable.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "openRecordDetails");
+        recordsTable.getActionMap().put("openRecordDetails", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                openSelectedRecordDetails();
             }
         });
 
@@ -567,6 +587,13 @@ public class DynamoDBBrowserFrame extends JFrame {
         }
 
         tableModel.addRow(new Vector<>(RecordGridModel.formatRow(columnNames, item)));
+    }
+
+    private void openSelectedRecordDetails() {
+        int row = recordsTable.getSelectedRow();
+        if (row >= 0) {
+            showRecordDetails(allRecords.get(row));
+        }
     }
 
     private void showRecordDetails(Map<String, AttributeValue> record) {
